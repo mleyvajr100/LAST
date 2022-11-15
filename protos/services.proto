@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package service;
+
+message Assignment {
+    message Value {
+      oneof value {
+          int32 int32_value   = 1;
+          string string_value = 2;
+          float float_value   = 3;
+          double double_value = 4;
+          bool bool_value     = 5;
+      }
+    }
+    string variable = 1;
+    Value value = 2;
+  }
+
+  
+message Status {
+    bool is_success = 1;
+    string message = 2;
+}
+
+message GetVariableReq {
+    string variable = 1;
+}
+
+message GetVariableRes {
+    Assignment assignment = 1;
+    Status status = 2;
+}
+
+
+message SetVariableReq {
+    Assignment assignment = 1;
+}
+
+message SetVariableRes {
+    Status status = 1;
+}
+
+// Public-facing interface for DBMS wrapper (ORM)
+service SoftwareTransactionalMemoryService {
+    rpc GetVariable(GetVariableReq) returns (GetVariableRes);
+    rpc SetVariable(SetVariableReq) returns (SetVariableRes);
+}
