@@ -1,47 +1,50 @@
 syntax = "proto3";
 
-package service;
+package services;
 
+// testing just an integer value for now
 message Assignment {
-    message Value {
-      oneof value {
-          int32 int32_value   = 1;
-          string string_value = 2;
-          float float_value   = 3;
-          double double_value = 4;
-          bool bool_value     = 5;
-      }
-    }
+    // message Value {
+    //   oneof value {
+    //       int32 int32_value   = 1;
+    //       string string_value = 2;
+    //       float float_value   = 3;
+    //       double double_value = 4;
+    //       bool bool_value     = 5;
+    //   }
+    // }
     string variable = 1;
-    Value value = 2;
+    int32 value = 2;
   }
 
-  
 message Status {
     bool is_success = 1;
     string message = 2;
 }
 
-message GetVariableReq {
+
+// ============ grpc protos for requests and resposnes ============
+message GetVariableRequest {
     string variable = 1;
 }
 
-message GetVariableRes {
+message GetVariableResponse {
     Assignment assignment = 1;
     Status status = 2;
 }
 
-
-message SetVariableReq {
+message SetVariableRequest {
     Assignment assignment = 1;
 }
 
-message SetVariableRes {
+message SetVariableResponse {
     Status status = 1;
 }
+// ================================================================
+
 
 // Public-facing interface for DBMS wrapper (ORM)
 service SoftwareTransactionalMemoryService {
-    rpc GetVariable(GetVariableReq) returns (GetVariableRes);
-    rpc SetVariable(SetVariableReq) returns (SetVariableRes);
+    rpc GetVariable(GetVariableRequest) returns (GetVariableResponse);
+    rpc SetVariable(SetVariableRequest) returns (SetVariableResponse);
 }

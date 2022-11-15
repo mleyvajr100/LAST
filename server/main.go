@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"context"
@@ -10,16 +10,80 @@ import (
 
 	"last/services"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type SoftwareTransactionalMemoryServiceServer struct{}
 
+type VariableItem struct {
+	Variable string
+}
+
+type AssignmentItem struct {
+	Variable             string   `protobuf:"bytes,1,opt,name=variable,proto3" json:"variable,omitempty"`
+	Value                int32    `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
 var db *mongo.Client
 var assignmentdb *mongo.Collection
 var mongoCtx context.Context
+
+func (s *SoftwareTransactionalMemoryServiceServer) GetVariable(ctx context.Context,
+	req *services.GetVariableRequest) (*services.GetVariableResponse, error) {
+	// convert string id (from proto) to mongoDB ObjectId
+	// oid, err := primitive.ObjectIDFromHex(req.GetVariable())
+	// if err != nil {
+	// 	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("Could not convert to ObjectId: %v", err))
+	// }
+
+	result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
+	// Create an empty AssignmentItem to write our decode result to
+	data := AssignmentItem{}
+	// decode and write to data
+	if err := result.Decode(&data); err != nil {
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
+	}
+	// Cast to ReadBlogRes type
+	response := &services.GetVariableResponse{
+		Assignment: &services.Assignment{
+			Variable: data.Variable,
+			Value:    data.Value,
+		},
+	}
+	return response, nil
+}
+
+func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Context,
+	req *services.SetVariableRequest) (*services.SetVariableResponse, error) {
+	// Essentially doing req.Blog to access the struct with a nil check
+	assignment := req.GetAssignment()
+	// Now we have to convert this into a BlogItem type to convert into BSON
+	data := AssignmentItem{
+		Variable: assignment.Variable,
+		Value:    assignment.Value,
+	}
+
+	// Insert the data into the database, result contains the newly generated Object ID for the new document
+	_, err := assignmentdb.InsertOne(mongoCtx, data)
+	// check for potential errors
+	if err != nil {
+		// return internal gRPC error to be handled later
+		return nil, status.Errorf(
+			codes.Internal,
+			fmt.Sprintf("Internal error: %v", err),
+		)
+	}
+	// return the blog in a CreateBlogRes type
+	return &services.SetVariableResponse{}, nil
+}
 
 func main() {
 	// Configure 'log' package to give file name and line number on eg. log.Fatal
