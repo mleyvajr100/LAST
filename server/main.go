@@ -65,14 +65,30 @@ func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Conte
 	req *services.SetVariableRequest) (*services.SetVariableResponse, error) {
 	// Essentially doing req.Blog to access the struct with a nil check
 	assignment := req.GetAssignment()
+
+	fmt.Printf("Received Set Request for variable: %s to set svalue: %d\n", assignment.Variable, assignment.Value)
 	// Now we have to convert this into a BlogItem type to convert into BSON
-	data := AssignmentItem{
-		Variable: assignment.Variable,
-		Value:    assignment.Value,
-	}
+	// data := AssignmentItem{
+	// 	Variable: assignment.Variable,
+	// 	Value:    assignment.Value,
+	// }
+
+	// option to set variable if not found
+
+	opts := options.FindOneAndUpdate().SetUpsert(true)
+	filter := bson.M{"variable": assignment.Variable}
+	// filter := bson.D{"v": 8}
+	update := bson.M{"$set": bson.M{"value": assignment.Value}}
+	// var updatedDocument bson.M
+	err := assignmentdb.FindOneAndUpdate(
+		ctx,
+		filter,
+		update,
+		opts,
+	)
 
 	// Insert the data into the database, result contains the newly generated Object ID for the new document
-	_, err := assignmentdb.InsertOne(mongoCtx, data)
+	// _, err := assignmentdb.InsertOne(mongoCtx, data)
 	// check for potential errors
 	if err != nil {
 		// return internal gRPC error to be handled later

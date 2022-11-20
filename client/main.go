@@ -34,13 +34,18 @@ func main() {
 	// Instantiate the BlogServiceClient with our client connection to the server
 	client = services.NewSoftwareTransactionalMemoryServiceClient(conn)
 
+	variable := "z"
+	var value int32 = 256
+
 	fmt.Println("Creating SetVariable Request")
 	setReq := &services.SetVariableRequest{
 		Assignment: &services.Assignment{
-			Variable: "x",
-			Value:    32,
+			Variable: variable,
+			Value:    value,
 		},
 	}
+
+	fmt.Printf("Set variable: %s to value: %d\n", variable, value)
 
 	// fmt.Println("Creating GetVariable Request")
 	// getReq := &services.GetVariableRequest{
