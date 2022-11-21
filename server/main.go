@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 
-	"last/services"
+	"github.com/last/services"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -67,6 +67,12 @@ func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Conte
 	assignment := req.GetAssignment()
 
 	fmt.Printf("Received Set Request for variable: %s to set svalue: %d\n", assignment.Variable, assignment.Value)
+
+	// convert string id (from proto) to mongoDB ObjectId
+	// id, err := primitive.ObjectIDFromHex(assignment.Variable)
+	// if err != nil {
+	// 	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("Could not convert to ObjectId: %v", err))
+	// }
 	// Now we have to convert this into a BlogItem type to convert into BSON
 	// data := AssignmentItem{
 	// 	Variable: assignment.Variable,
@@ -77,9 +83,8 @@ func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Conte
 
 	opts := options.FindOneAndUpdate().SetUpsert(true)
 	filter := bson.M{"variable": assignment.Variable}
-	// filter := bson.D{"v": 8}
+	// filter := bson.M{"_id": id}
 	update := bson.M{"$set": bson.M{"value": assignment.Value}}
-	// var updatedDocument bson.M
 	err := assignmentdb.FindOneAndUpdate(
 		ctx,
 		filter,
