@@ -38,28 +38,86 @@ var mongoCtx context.Context
 
 func (s *SoftwareTransactionalMemoryServiceServer) GetVariable(ctx context.Context,
 	req *services.GetVariableRequest) (*services.GetVariableResponse, error) {
-	// convert string id (from proto) to mongoDB ObjectId
-	// oid, err := primitive.ObjectIDFromHex(req.GetVariable())
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("Could not convert to ObjectId: %v", err))
+
+	// log.Println("starting transaction")
+	// Step 1: Define the callback that specifies the sequence of operations to perform inside the transaction.
+	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+		// Important: You must pass sessCtx as the Context parameter to the operations for them to be executed in the
+		// transaction.
+		data := AssignmentItem{}
+		result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
+		if err := result.Decode(&data); err != nil {
+			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
+		}
+		response := &services.GetVariableResponse{
+			Assignment: &services.Assignment{
+				Variable: data.Variable,
+				Value:    data.Value,
+			},
+		}
+		return response, nil
+	}
+
+	// Step 2: Start a session and run the callback using WithTransaction.
+	session, err := db.StartSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.EndSession(ctx)
+	response, err := session.WithTransaction(ctx, callback)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resp, ok := response.(*services.GetVariableResponse)
+
+	if !ok {
+		return nil, nil
+	}
+
+	// log.Printf("result: %v\n", data)
+
+	// data := AssignmentItem{}
+	// decode and write to data
+	// if err := result.Decode(&data); err != nil {
+	// 	return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
 	// }
 
-	result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
-	// Create an empty AssignmentItem to write our decode result to
-	data := AssignmentItem{}
-	// decode and write to data
-	if err := result.Decode(&data); err != nil {
-		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
-	}
-	// Cast to ReadBlogRes type
-	response := &services.GetVariableResponse{
-		Assignment: &services.Assignment{
-			Variable: data.Variable,
-			Value:    data.Value,
-		},
-	}
-	return response, nil
+	// response := &services.GetVariableResponse{
+	// 	Assignment: &services.Assignment{
+	// 		Variable: data.Variable,
+	// 		Value:    data.Value,
+	// 	},
+	// }
+	return resp, nil
+
 }
+
+// func (s *SoftwareTransactionalMemoryServiceServer) GetVariable(ctx context.Context,
+// 	req *services.GetVariableRequest) (*services.GetVariableResponse, error) {
+// 	// convert string id (from proto) to mongoDB ObjectId
+// 	// oid, err := primitive.ObjectIDFromHex(req.GetVariable())
+// 	// if err != nil {
+// 	// 	return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("Could not convert to ObjectId: %v", err))
+// 	// }
+
+// 	result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
+// 	// Create an empty AssignmentItem to write our decode result to
+// 	data := AssignmentItem{}
+// 	// decode and write to data
+// 	if err := result.Decode(&data); err != nil {
+// 		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
+// 	}
+// 	// Cast to ReadBlogRes type
+// 	response := &services.GetVariableResponse{
+// 		Assignment: &services.Assignment{
+// 			Variable: data.Variable,
+// 			Value:    data.Value,
+// 		},
+// 	}
+// 	return response, nil
+// }
 
 func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Context,
 	req *services.SetVariableRequest) (*services.SetVariableResponse, error) {
@@ -85,25 +143,71 @@ func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Conte
 	filter := bson.M{"variable": assignment.Variable}
 	// filter := bson.M{"_id": id}
 	update := bson.M{"$set": bson.M{"value": assignment.Value}}
-	err := assignmentdb.FindOneAndUpdate(
-		ctx,
-		filter,
-		update,
-		opts,
-	)
+	// err := assignmentdb.FindOneAndUpdate(
+	// 	ctx,
+	// 	filter,
+	// 	update,
+	// 	opts,
+	// )
 
-	// Insert the data into the database, result contains the newly generated Object ID for the new document
-	// _, err := assignmentdb.InsertOne(mongoCtx, data)
-	// check for potential errors
-	if err != nil {
-		// return internal gRPC error to be handled later
-		return nil, status.Errorf(
-			codes.Internal,
-			fmt.Sprintf("Internal error: %v", err),
+	// // Insert the data into the database, result contains the newly generated Object ID for the new document
+	// // _, err := assignmentdb.InsertOne(mongoCtx, data)
+	// // check for potential errors
+	// if err != nil {
+	// 	// return internal gRPC error to be handled later
+	// 	return nil, status.Errorf(
+	// 		codes.Internal,
+	// 		fmt.Sprintf("Internal error: %v", err),
+	// 	)
+	// }
+
+	// Step 1: Define the callback that specifies the sequence of operations to perform inside the transaction.
+	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+		// Important: You must pass sessCtx as the Context parameter to the operations for them to be executed in the
+		// transaction.
+		err := assignmentdb.FindOneAndUpdate(
+			ctx,
+			filter,
+			update,
+			opts,
 		)
+
+		// Insert the data into the database, result contains the newly generated Object ID for the new document
+		// _, err := assignmentdb.InsertOne(mongoCtx, data)
+		// check for potential errors
+		if err != nil {
+			// return internal gRPC error to be handled later
+			return nil, status.Errorf(
+				codes.Internal,
+				fmt.Sprintf("Internal error: %v", err),
+			)
+		}
+		// return the blog in a CreateBlogRes type
+		return &services.SetVariableResponse{}, nil
 	}
-	// return the blog in a CreateBlogRes type
-	return &services.SetVariableResponse{}, nil
+
+	// Step 2: Start a session and run the callback using WithTransaction.
+	session, err := db.StartSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.EndSession(ctx)
+	response, err := session.WithTransaction(ctx, callback)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resp, ok := response.(*services.SetVariableResponse)
+
+	if !ok {
+		return nil, nil
+	}
+
+	// // return the blog in a CreateBlogRes type
+	// return &services.SetVariableResponse{}, nil
+
+	return resp, nil
 }
 
 func main() {

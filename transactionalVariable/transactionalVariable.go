@@ -1,8 +1,6 @@
 package transactionalvariable
 
 import (
-	"fmt"
-
 	"github.com/last/client"
 )
 
@@ -18,7 +16,6 @@ type TxVar struct {
 }
 
 func (txVar *TxVar) Get() int32 {
-	fmt.Println("IM herer")
 	return client.GetVariable(txVar.variable)
 }
 
