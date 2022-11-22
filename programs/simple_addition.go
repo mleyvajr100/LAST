@@ -16,15 +16,12 @@ func main() {
 	fmt.Printf("variable %s has value %d\n", y.Name(), y.Get())
 
 	// z := tx.New("z", x.Get()+y.Get())
+	// fmt.Printf("variable %s has value %d\n", z.Name(), z.Get())
 
+	// run multiple threads and increment variable x. Should add up.
 	for i := 0; i < 10; i++ {
 		go func() {
-			x.Set(x.Get() + 2)
-			// fmt.Println("here")
-			// fmt.Printf("variable %s has value %d\n", x.Name(), x.Get())
+			x.Set(x.Get() + 1)
 		}()
 	}
-	fmt.Printf("variable %s has value %d\n", x.Name(), x.Get())
-
-	// fmt.Printf("variable %s has value %d\n", z.Name(), z.Get())
 }
