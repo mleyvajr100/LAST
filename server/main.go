@@ -35,53 +35,137 @@ type AssignmentItem struct {
 var db *mongo.Client
 var assignmentdb *mongo.Collection
 var mongoCtx context.Context
+var sessions map[string]mongo.Session
+
+func (s *SoftwareTransactionalMemoryServiceServer) CreateSession(ctx context.Context,
+	req *services.CreateSessionRequest) (*services.CreateSessionResponse, error) {
+	var session mongo.Session
+	var err error
+
+	if session, err = db.StartSession(); err != nil {
+		fmt.Println(session)
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start session"))
+	}
+	if err := session.StartTransaction(); err != nil {
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start a transaction"))
+	}
+
+	key := session.ID().String()
+	sessions[key] = session
+
+	response := &services.CreateSessionResponse{
+		SessionID: &services.SessionID{
+			Key: key,
+		},
+	}
+	return response, nil
+}
+
+func (s *SoftwareTransactionalMemoryServiceServer) CommitSession(ctx context.Context,
+	req *services.CommitSessionRequest) (*services.CommitSessionResponse, error) {
+
+	sessionID := req.GetSessionID().GetKey()
+
+	session, ok := sessions[sessionID]
+
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Session does not exist"))
+	}
+
+	var err error
+	if err = mongo.WithSession(ctx, session, func(sc mongo.SessionContext) error {
+		if err = session.CommitTransaction(sc); err != nil {
+			fmt.Println(err)
+			return status.Errorf(codes.NotFound, fmt.Sprintf("Transaction could not be committed"))
+		}
+		return nil
+	}); err != nil {
+		fmt.Println(err)
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed during committing"))
+	}
+	return &services.CommitSessionResponse{}, nil
+}
 
 func (s *SoftwareTransactionalMemoryServiceServer) GetVariable(ctx context.Context,
 	req *services.GetVariableRequest) (*services.GetVariableResponse, error) {
 
-	// Define the callback that specifies the sequence of operations to perform inside the transaction.
-	// Important: You must pass sessCtx as the Context parameter to the operations for them to be executed in the transaction.
-	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
-		data := AssignmentItem{}
-		result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
-		if err := result.Decode(&data); err != nil {
-			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
-		}
-		response := &services.GetVariableResponse{
-			Assignment: &services.Assignment{
-				Variable: data.Variable,
-				Value:    data.Value,
-			},
-		}
-		return response, nil
-	}
+	sessionID := req.GetSessionID().GetKey()
 
-	// Start a session and run the callback using WithTransaction.
-	session, err := db.StartSession()
-	if err != nil {
-		return nil, err
-	}
-	defer session.EndSession(ctx)
-	response, err := session.WithTransaction(ctx, callback)
+	session, ok := sessions[sessionID]
 
-	if err != nil {
-		return nil, err
-	}
-
-	resp, ok := response.(*services.GetVariableResponse)
+	fmt.Println(ok)
+	var err error
 
 	if !ok {
-		return nil, nil
+		if session, err = db.StartSession(); err != nil {
+			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start session"))
+		}
+		if err = session.StartTransaction(); err != nil {
+			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start a transaction"))
+		}
 	}
 
-	return resp, nil
+	variable := req.GetVariable()
+	data := AssignmentItem{}
 
+	fmt.Printf("Received Get Request for variable: %s\n", variable)
+
+	if err = mongo.WithSession(ctx, session, func(sc mongo.SessionContext) error {
+		result := assignmentdb.FindOne(sc, bson.M{"variable": variable})
+
+		fmt.Print("got result in get:")
+		fmt.Println(result)
+		if err := result.Decode(&data); err != nil {
+			sc.AbortTransaction(sc)
+			fmt.Println("aborted")
+			return status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with variable %s: %v", variable, err))
+		}
+
+		fmt.Println(err)
+		return nil
+	}); err != nil {
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to execute operation in session while Getting"))
+	}
+
+	// result := assignmentdb.FindOne(ctx, bson.M{"variable": variable})
+	// // Create an empty AssignmentItem to write our decode result to
+	// data := AssignmentItem{}
+	// // decode and write to data
+	// if err := result.Decode(&data); err != nil {
+	// 	return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with variable %s: %v", variable, err))
+	// }
+
+	response := &services.GetVariableResponse{
+		Assignment: &services.Assignment{
+			Variable: data.Variable,
+			Value:    data.Value,
+		},
+	}
+
+	return response, nil
 }
 
 func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Context,
 	req *services.SetVariableRequest) (*services.SetVariableResponse, error) {
 	// Essentially doing req.Blog to access the struct with a nil check
+	sessionID := req.GetSessionID().GetKey()
 	assignment := req.GetAssignment()
+
+	// fmt.Println(sessions)
+
+	session, ok := sessions[sessionID]
+
+	fmt.Println(ok)
+	var err error
+
+	if !ok {
+		if session, err = db.StartSession(); err != nil {
+			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start session"))
+		}
+		if err = session.StartTransaction(); err != nil {
+			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to start a transaction"))
+		}
+	}
 
 	fmt.Printf("Received Set Request for variable: %s to set value: %d\n", assignment.Variable, assignment.Value)
 
@@ -90,49 +174,141 @@ func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Conte
 	filter := bson.M{"variable": assignment.Variable}
 	update := bson.M{"$set": bson.M{"value": assignment.Value}}
 
-	// Define the callback that specifies the sequence of operations to perform inside the transaction.
-	// Important: Must pass sessCtx as the Context parameter to the operations for them to be executed in the transaction.
-	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
-
+	if err = mongo.WithSession(ctx, session, func(sc mongo.SessionContext) error {
 		// update the desired variable
-		err := assignmentdb.FindOneAndUpdate(
-			ctx,
+		result := assignmentdb.FindOneAndUpdate(
+			sc,
 			filter,
 			update,
 			opts,
 		)
 
+		fmt.Println("Checking for errors in set")
+		fmt.Println(err)
 		// check for potential errors
-		if err != nil {
+		if result == nil {
+
+			fmt.Println("FOUND AN ERROR, ABORTING")
+			sc.AbortTransaction(sc)
 			// return internal gRPC error to be handled later
-			return nil, status.Errorf(
+			return status.Errorf(
 				codes.Internal,
 				fmt.Sprintf("Internal error: %v", err),
 			)
 		}
-		return &services.SetVariableResponse{}, nil
+		fmt.Println("No Errors")
+		return nil
+	}); err != nil {
+		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Failed to execute operation in session while Setting"))
 	}
-
-	// Start a session and run the callback using WithTransaction.
-	session, err := db.StartSession()
-	if err != nil {
-		return nil, err
-	}
-	defer session.EndSession(ctx)
-	response, err := session.WithTransaction(ctx, callback)
 
 	if err != nil {
 		return nil, err
 	}
 
-	resp, ok := response.(*services.SetVariableResponse)
-
-	if !ok {
-		return nil, nil
-	}
+	resp := &services.SetVariableResponse{}
 
 	return resp, nil
 }
+
+// func (s *SoftwareTransactionalMemoryServiceServer) GetVariable(ctx context.Context,
+// 	req *services.GetVariableRequest) (*services.GetVariableResponse, error) {
+
+// 	// Define the callback that specifies the sequence of operations to perform inside the transaction.
+// 	// Important: You must pass sessCtx as the Context parameter to the operations for them to be executed in the transaction.
+// 	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+// 		data := AssignmentItem{}
+// 		result := assignmentdb.FindOne(ctx, bson.M{"variable": req.GetVariable()})
+// 		if err := result.Decode(&data); err != nil {
+// 			return nil, status.Errorf(codes.NotFound, fmt.Sprintf("Could not find assignment with Object Id %s: %v", req.GetVariable(), err))
+// 		}
+// 		response := &services.GetVariableResponse{
+// 			Assignment: &services.Assignment{
+// 				Variable: data.Variable,
+// 				Value:    data.Value,
+// 			},
+// 		}
+// 		return response, nil
+// 	}
+
+// 	// Start a session and run the callback using WithTransaction.
+// 	session, err := db.StartSession()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer session.EndSession(ctx)
+// 	response, err := session.WithTransaction(ctx, callback)
+
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	resp, ok := response.(*services.GetVariableResponse)
+
+// 	if !ok {
+// 		return nil, nil
+// 	}
+
+// 	return resp, nil
+
+// }
+
+// func (s *SoftwareTransactionalMemoryServiceServer) SetVariable(ctx context.Context,
+// 	req *services.SetVariableRequest) (*services.SetVariableResponse, error) {
+// 	// Essentially doing req.Blog to access the struct with a nil check
+// 	assignment := req.GetAssignment()
+
+// 	fmt.Printf("Received Set Request for variable: %s to set value: %d\n", assignment.Variable, assignment.Value)
+
+// 	// option to set variable if not found
+// 	opts := options.FindOneAndUpdate().SetUpsert(true)
+// 	filter := bson.M{"variable": assignment.Variable}
+// 	update := bson.M{"$set": bson.M{"value": assignment.Value}}
+
+// 	// Define the callback that specifies the sequence of operations to perform inside the transaction.
+// 	// Important: Must pass sessCtx as the Context parameter to the operations for them to be executed in the transaction.
+// 	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+
+// 		// update the desired variable
+// 		err := assignmentdb.FindOneAndUpdate(
+// 			ctx,
+// 			filter,
+// 			update,
+// 			opts,
+// 		)
+
+// 		// check for potential errors
+// 		if err != nil {
+// 			// return internal gRPC error to be handled later
+// 			return nil, status.Errorf(
+// 				codes.Internal,
+// 				fmt.Sprintf("Internal error: %v", err),
+// 			)
+// 		}
+// 		return &services.SetVariableResponse{}, nil
+// 	}
+
+// 	// Start a session and run the callback using WithTransaction.
+// 	session, err := db.StartSession()
+
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer session.EndSession(ctx)
+// 	response, err := session.WithTransaction(ctx, callback)
+
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	resp, ok := response.(*services.SetVariableResponse)
+
+// 	if !ok {
+// 		return nil, nil
+// 	}
+
+// 	return resp, nil
+// }
 
 func main() {
 	// Configure 'log' package to give file name and line number on eg. log.Fatal
@@ -146,6 +322,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to listen on port :50051: %v", err)
 	}
+
+	// create sessions map
+	sessions = make(map[string]mongo.Session)
 
 	// Set options, here we can configure things like TLS support
 	opts := []grpc.ServerOption{}
@@ -163,7 +342,7 @@ func main() {
 	mongoCtx = context.Background()
 
 	// Connect takes in a context and options, the connection URI is the only option we pass for now
-	db, err = mongo.Connect(mongoCtx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	db, err = mongo.Connect(mongoCtx, options.Client().ApplyURI("mongodb://localhost:27017,localhost:27018/?replicaSet=rep"))
 	// Handle potential errors
 	if err != nil {
 		log.Fatal(err)

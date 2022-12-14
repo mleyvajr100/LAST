@@ -5,8 +5,8 @@ import (
 )
 
 type TransactionalVariable interface {
-	Get() int32
-	Set(int32)
+	Get(string) int32
+	Set(int32, string)
 	Name() string
 }
 
@@ -15,19 +15,27 @@ type TxVar struct {
 	value    int32
 }
 
-func (txVar *TxVar) Get() int32 {
-	return client.GetVariable(txVar.variable)
+func CreateSession() string {
+	return client.CreateSession()
 }
 
-func (txVar *TxVar) Set(value int32) {
-	client.SetVariable(txVar.variable, value)
+func CommitSession(sessionID string) {
+	client.CommitSession(sessionID)
+}
+
+func (txVar *TxVar) Get(sessionID string) int32 {
+	return client.GetVariable(txVar.variable, sessionID)
+}
+
+func (txVar *TxVar) Set(value int32, sessionID string) {
+	client.SetVariable(txVar.variable, value, sessionID)
 }
 
 func (txVar *TxVar) Name() string {
 	return txVar.variable
 }
 
-func New(variable string, value int32) *TxVar {
-	client.SetVariable(variable, value)
+func New(variable string, value int32, sessionID string) *TxVar {
+	client.SetVariable(variable, value, sessionID)
 	return &TxVar{variable: variable, value: value}
 }

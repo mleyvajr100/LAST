@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package services;
 
+option go_package = "./services";
+
 // testing just an integer value for now
 message Assignment {
     // message Value {
@@ -22,10 +24,15 @@ message Status {
     string message = 2;
 }
 
+message SessionID {
+    string key = 1;
+}
+
 
 // ============ grpc protos for requests and resposnes ============
 message GetVariableRequest {
     string variable = 1;
+    SessionID sessionID = 2;
 }
 
 message GetVariableResponse {
@@ -35,9 +42,26 @@ message GetVariableResponse {
 
 message SetVariableRequest {
     Assignment assignment = 1;
+    SessionID sessionID = 2;
 }
 
 message SetVariableResponse {
+    Status status = 1;
+}
+
+message CreateSessionRequest {
+    Status status = 1;
+}
+
+message CreateSessionResponse {
+    SessionID sessionID = 1;
+}
+
+message CommitSessionRequest {
+    SessionID sessionID = 1;
+}
+
+message CommitSessionResponse {
     Status status = 1;
 }
 // ================================================================
@@ -47,4 +71,6 @@ message SetVariableResponse {
 service SoftwareTransactionalMemoryService {
     rpc GetVariable(GetVariableRequest) returns (GetVariableResponse);
     rpc SetVariable(SetVariableRequest) returns (SetVariableResponse);
+    rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+    rpc CommitSession(CommitSessionRequest) returns (CommitSessionResponse);
 }
